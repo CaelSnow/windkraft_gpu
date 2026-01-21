@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 GPU-Check-Skript - Zeigt ob wirklich GPU oder Software-Rendering verwendet wird.
+Unterstützt EGL für headless NVIDIA Server.
 """
 
 import os
@@ -13,8 +14,9 @@ def check_gpu():
     
     # 1. Umgebungsvariablen prüfen
     print("\n[1] Relevante Umgebungsvariablen:")
-    env_vars = ['DISPLAY', 'MESA_GL_VERSION_OVERRIDE', 'LIBGL_ALWAYS_SOFTWARE', 
-                '__GLX_VENDOR_LIBRARY_NAME', 'VGL_DISPLAY', 'EGL_PLATFORM']
+    env_vars = ['DISPLAY', 'SDL_VIDEODRIVER', 'PYOPENGL_PLATFORM',
+                'MESA_GL_VERSION_OVERRIDE', 'LIBGL_ALWAYS_SOFTWARE', 
+                '__GLX_VENDOR_LIBRARY_NAME', 'EGL_PLATFORM']
     for var in env_vars:
         val = os.environ.get(var, "(nicht gesetzt)")
         print(f"    {var}: {val}")
@@ -35,70 +37,84 @@ def check_gpu():
     except Exception as e:
         print(f"    ✗ Fehler: {e}")
     
-    # 3. PyOpenGL Info
-    print("\n[3] OpenGL-Kontext erstellen und prüfen:")
+    # 3. PyOpenGL mit EGL
+    print("\n[3] OpenGL-Kontext erstellen:")
+    
+    pyopengl_platform = os.environ.get('PYOPENGL_PLATFORM', '')
+    sdl_driver = os.environ.get('SDL_VIDEODRIVER', '')
+    
+    print(f"    PYOPENGL_PLATFORM: {pyopengl_platform}")
+    print(f"    SDL_VIDEODRIVER: {sdl_driver}")
+    
     try:
+        # Pygame für OpenGL-Kontext
         import pygame
-        from pygame.locals import DOUBLEBUF, OPENGL, HIDDEN
+        from pygame.locals import DOUBLEBUF, OPENGL
         
         pygame.init()
-        # Versuche Hidden Window (für Server ohne Display)
-        try:
-            screen = pygame.display.set_mode((100, 100), DOUBLEBUF | OPENGL | HIDDEN)
-        except:
-            # Fallback: Normales Fenster
-            screen = pygame.display.set_mode((100, 100), DOUBLEBUF | OPENGL)
+        
+        # Offscreen-Modus: Kein RESIZABLE
+        flags = DOUBLEBUF | OPENGL
+        screen = pygame.display.set_mode((100, 100), flags)
         
         from OpenGL.GL import glGetString, GL_RENDERER, GL_VENDOR, GL_VERSION
         
-        renderer = glGetString(GL_RENDERER).decode('utf-8')
-        vendor = glGetString(GL_VENDOR).decode('utf-8')
-        version = glGetString(GL_VERSION).decode('utf-8')
+        renderer = glGetString(GL_RENDERER)
+        vendor = glGetString(GL_VENDOR)
+        version = glGetString(GL_VERSION)
         
-        print(f"    GL_RENDERER: {renderer}")
+        # Bytes zu String
+        renderer = renderer.decode('utf-8') if renderer else "Unknown"
+        vendor = vendor.decode('utf-8') if vendor else "Unknown"
+        version = version.decode('utf-8') if version else "Unknown"
+        
+        print(f"\n    GL_RENDERER: {renderer}")
         print(f"    GL_VENDOR:   {vendor}")
         print(f"    GL_VERSION:  {version}")
         
         # Analyse
         print("\n[4] ANALYSE:")
         renderer_lower = renderer.lower()
+        vendor_lower = vendor.lower()
         
         if 'llvmpipe' in renderer_lower:
             print("    ⚠️  SOFTWARE-RENDERING (llvmpipe)!")
             print("    → GPU wird NICHT genutzt!")
             print("    → Mesa Software Rasterizer ist aktiv")
-            print("\n    Lösung für NVIDIA GPU Server:")
-            print("    export __GLX_VENDOR_LIBRARY_NAME=nvidia")
-            print("    export EGL_PLATFORM=device")
-            print("    Oder: Nutze VirtualGL / xvfb-run")
+            print("\n    Für NVIDIA GPU auf headless Server:")
+            print("    export SDL_VIDEODRIVER=offscreen")
+            print("    export PYOPENGL_PLATFORM=egl")
+            print("    python check_gpu.py")
+            return False
             
-        elif 'mesa' in renderer_lower and 'nvidia' not in vendor.lower():
-            print("    ⚠️  MESA-RENDERER (möglicherweise Software)")
-            print("    → Könnte Software oder Intel GPU sein")
-            
-        elif 'nvidia' in vendor.lower() or 'nvidia' in renderer_lower:
+        elif 'nvidia' in vendor_lower or 'nvidia' in renderer_lower:
             print("    ✓ NVIDIA GPU wird genutzt!")
             print("    → Hardware-Rendering aktiv")
-            # Prüfe welche GPU
-            if 't4' in renderer_lower:
+            if 't4' in renderer_lower or 'tesla' in renderer_lower:
                 print("    → Tesla T4 erkannt (Datacenter GPU)")
-            elif 'v100' in renderer_lower:
-                print("    → Tesla V100 erkannt (Datacenter GPU)")
-            elif 'a100' in renderer_lower:
-                print("    → A100 erkannt (Datacenter GPU)")
+            return True
+            
+        elif 'mesa' in renderer_lower or 'mesa' in vendor_lower:
+            print("    ⚠️  Mesa-Renderer (möglicherweise Software)")
+            return False
+            
         else:
-            print(f"    ? Unbekannter Renderer: {renderer}")
-        
-        pygame.quit()
+            print(f"    ? Renderer: {renderer}")
+            return True
         
     except Exception as e:
         print(f"    ✗ OpenGL-Fehler: {e}")
-        print("\n    Mögliche Ursachen:")
-        print("    - Kein X11/Display verfügbar")
-        print("    - OpenGL-Bibliothek fehlt")
-        print("    - Treiber nicht korrekt installiert")
+        import traceback
+        traceback.print_exc()
+        return False
+    finally:
+        try:
+            pygame.quit()
+        except:
+            pass
     
     print("\n" + "=" * 60)
 
 if __name__ == "__main__":
-    check_gpu()
+    success = check_gpu()
+    sys.exit(0 if success else 1)

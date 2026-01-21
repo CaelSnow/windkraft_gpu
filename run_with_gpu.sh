@@ -1,10 +1,10 @@
 #!/bin/bash
 # =============================================================================
-# GPU-Rendering auf Headless Server (Tesla T4, V100, A100, etc.)
+# GPU-Rendering auf Headless Server - EGL Version
 # =============================================================================
 #
-# Problem: Ohne X11 Display fällt OpenGL auf Mesa/llvmpipe (Software) zurück
-# Lösung:  Virtuelles Framebuffer (Xvfb) + NVIDIA als GLX-Vendor
+# GLX funktioniert nicht mit NVIDIA + Xvfb (BadAlloc Error)
+# Lösung: EGL für echtes headless GPU-Rendering
 #
 # Verwendung:
 #   chmod +x run_with_gpu.sh
@@ -12,35 +12,22 @@
 #
 # =============================================================================
 
-# NVIDIA als OpenGL-Vendor erzwingen
-export __GLX_VENDOR_LIBRARY_NAME=nvidia
-export __NV_PRIME_RENDER_OFFLOAD=1
-export __VK_LAYER_NV_optimus=NVIDIA_only
+echo "=========================================="
+echo "NVIDIA Tesla T4 - Headless GPU Rendering"
+echo "=========================================="
 
-# EGL für headless rendering
-export EGL_PLATFORM=device
-
-# Mesa Software-Rendering deaktivieren
-export LIBGL_ALWAYS_SOFTWARE=0
-
-# SDL/Pygame Einstellungen für bessere Kompatibilität
+# Kein Audio auf Server
 export SDL_AUDIODRIVER=dummy
-export SDL_VIDEODRIVER=x11
 
-# Xvfb (virtuelles Display) starten und Befehl ausführen
-echo "=========================================="
-echo "GPU-Rendering mit Tesla T4"
-echo "=========================================="
-echo "Starte virtuelles Display mit Xvfb..."
+# SDL/Pygame: Offscreen Rendering
+export SDL_VIDEODRIVER=offscreen
 
-# Prüfe ob Xvfb installiert ist
-if ! command -v xvfb-run &> /dev/null; then
-    echo "FEHLER: xvfb-run nicht gefunden!"
-    echo "Installiere mit: sudo apt-get install xvfb"
-    exit 1
-fi
+# PyOpenGL: EGL Backend für headless NVIDIA
+export PYOPENGL_PLATFORM=egl
 
-# Führe Befehl mit virtuellem Display aus
-# -a = automatisch freien Display-Port finden
-# -s = Screen-Optionen
-xvfb-run -a -s "-screen 0 1920x1080x24 +extension GLX" "$@"
+echo "EGL Headless Rendering aktiviert"
+echo "SDL_VIDEODRIVER=$SDL_VIDEODRIVER"
+echo "PYOPENGL_PLATFORM=$PYOPENGL_PLATFORM"
+echo ""
+
+"$@"

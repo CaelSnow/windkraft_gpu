@@ -100,7 +100,13 @@ class Germany3DViewer:
         self._load_data()
     
     def _init_pygame(self):
-        """Initialisiert Pygame."""
+        """Initialisiert Pygame (mit EGL-Support für headless Server)."""
+        import os
+        
+        # Prüfe ob headless/offscreen Modus
+        video_driver = os.environ.get('SDL_VIDEODRIVER', '')
+        is_headless = video_driver in ('offscreen', 'dummy')
+        
         pygame.init()
         pygame.display.set_caption(WINDOW_TITLE)
         pygame.font.init()
@@ -110,13 +116,19 @@ class Germany3DViewer:
         self.font_large = pygame.font.SysFont('Arial', 24, bold=True)
         self.font_year = pygame.font.SysFont('Arial', 72, bold=True)  # Extra gross fuer Jahr
         
-        # Anti-Aliasing
-        pygame.display.gl_set_attribute(GL_MULTISAMPLEBUFFERS, 1)
-        pygame.display.gl_set_attribute(GL_MULTISAMPLESAMPLES, 4)
+        # Anti-Aliasing (nicht im headless Modus)
+        if not is_headless:
+            pygame.display.gl_set_attribute(GL_MULTISAMPLEBUFFERS, 1)
+            pygame.display.gl_set_attribute(GL_MULTISAMPLESAMPLES, 4)
+        
+        # Fenster-Flags
+        flags = DOUBLEBUF | OPENGL
+        if not is_headless:
+            flags |= RESIZABLE
         
         self.screen = pygame.display.set_mode(
             (self.width, self.height),
-            DOUBLEBUF | OPENGL | RESIZABLE
+            flags
         )
     
     def _load_data(self):
