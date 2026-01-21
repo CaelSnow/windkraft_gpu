@@ -179,6 +179,18 @@ class HardwareCapabilities:
         except ImportError:
             return 8.0  # Annahme: 8 GB
     
+    def _check_nvidia_cuda(self) -> bool:
+        """Prüft ob nvidia-smi eine GPU findet (CUDA verfügbar)."""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
+                capture_output=True, text=True, timeout=5
+            )
+            return result.returncode == 0 and len(result.stdout.strip()) > 0
+        except:
+            return False
+    
     def _detect_gpu(self):
         """Erkennt GPU über OpenGL (nutzt bestehenden Kontext wenn vorhanden)."""
         try:
@@ -380,6 +392,22 @@ class HardwareCapabilities:
         else:
             self.rendering_tier = RenderingTier.MINIMAL
         
+        # =====================================================================
+        # WICHTIG: Prüfe ob NVIDIA GPU vorhanden aber llvmpipe aktiv
+        # (typisch für Google Colab - GPU nur für CUDA, nicht OpenGL)
+        # =====================================================================
+        gpu_name_lower = self.gpu_name.lower()
+        is_software_rendering = 'llvmpipe' in gpu_name_lower or 'swrast' in gpu_name_lower
+        
+        # Prüfe ob nvidia-smi eine GPU findet (CUDA verfügbar)
+        has_nvidia_cuda = self._check_nvidia_cuda()
+        
+        if is_software_rendering and has_nvidia_cuda:
+            print("\n  ⚠️  HINWEIS: NVIDIA GPU erkannt, aber OpenGL nutzt Software-Rendering!")
+            print("      → Typisch für Google Colab / Headless Server")
+            print("      → GPU wird für CUDA genutzt, nicht für OpenGL")
+            print("      → VBOs werden trotzdem aktiviert (schneller als glBegin/glEnd)")
+        
         # Einstellungen basierend auf Tier
         # ALLE FEATURES AKTIVIERT - Benutzer möchte volle Qualität
         # LOD und Quadtree sorgen für gute Performance
@@ -399,20 +427,20 @@ class HardwareCapabilities:
             self.use_vbo_rendering = self.has_vbo  # VBO für GPU-Beschleunigung
             
         elif self.rendering_tier == RenderingTier.LOW:
-            # Intel UHD etc. - Immediate Mode (glBegin/glEnd) ist oft schneller
+            # Intel UHD etc. - trotzdem VBOs wenn verfügbar
             self.max_turbines_recommended = 50000
             self.use_shadows = True
             self.lod_mode = "aggressive"
             self.use_instanced_rendering = False
-            self.use_vbo_rendering = False  # Bleibe bei glBegin/glEnd
+            self.use_vbo_rendering = self.has_vbo  # VBOs sind auch mit Software schneller
             
-        else:  # MINIMAL
-            # Schwächste Hardware - glBegin/glEnd, kein VBO
+        else:  # MINIMAL (llvmpipe, etc.)
+            # Software-Rendering - VBOs trotzdem nutzen wenn verfügbar
             self.max_turbines_recommended = 50000
             self.use_shadows = True
-            self.lod_mode = "aggressive"
+            self.lod_mode = "extreme"  # Aggressiveres LOD für Software
             self.use_instanced_rendering = False
-            self.use_vbo_rendering = False
+            self.use_vbo_rendering = self.has_vbo  # VBOs auch mit llvmpipe ~2x schneller
         
         # RAM-basierte Anpassungen
         if self.ram_gb < 4:
